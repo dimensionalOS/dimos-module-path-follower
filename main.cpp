@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
+#include <string>
 #include <thread>
 #include <mutex>
 
@@ -16,6 +17,13 @@
 
 #include "dimos_native_module.hpp"
 #include "point_cloud_utils.hpp"
+
+// ---------------------------------------------------------------------------
+// Debug logging (enabled at runtime via DIMOS_DEBUG=1)
+// ---------------------------------------------------------------------------
+static bool dimosDebug = false;
+#define DBG(...) do { if (dimosDebug) { printf("[path_follower][DEBUG] " __VA_ARGS__); fflush(stdout); } } while (0)
+#define DBG_EVERY(N, ...) do { if (dimosDebug) { static int _c=0; if ((++_c % (N)) == 0) { printf("[path_follower][DEBUG] " __VA_ARGS__); fflush(stdout); } } } while (0)
 
 #include "nav_msgs/Odometry.hpp"
 #include "nav_msgs/Path.hpp"
@@ -163,6 +171,9 @@ public:
             useInclRateToSlow) {
             slowInitTime = stamp_to_seconds(msg->header.stamp);
         }
+
+        DBG_EVERY(50, "odom #%d: pose=(%.2f,%.2f,%.2f) yaw=%.2f t=%.3f\n",
+                  _c, vehicleX, vehicleY, vehicleZ, vehicleYaw, odomTime);
     }
 
     // Path handler -----------------------------------------------------------
@@ -208,6 +219,15 @@ public:
 
         pathPointID = 0;
         pathInit = true;
+
+        if (dimosDebug) {
+            double endX = 0, endY = 0;
+            if (pathSize > 0) { endX = pathPoses[pathSize - 1].x; endY = pathPoses[pathSize - 1].y; }
+            printf("[path_follower][DEBUG] path received: poses=%d end=(%.2f,%.2f) "
+                   "hasGoalYaw=%d goalYaw=%.2f\n",
+                   pathSize, endX, endY, (int)hasGoalYaw, goalYaw);
+            fflush(stdout);
+        }
     }
 };
 
@@ -216,6 +236,12 @@ public:
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv)
 {
+    // Enable verbose debug logging when DIMOS_DEBUG env var is set to a
+    // non-empty, non-zero value.
+    if (const char* dbg = std::getenv("DIMOS_DEBUG")) {
+        dimosDebug = (dbg[0] != '\0' && std::string(dbg) != "0");
+    }
+
     // --- Parse CLI args via NativeModule ---
     dimos::NativeModule mod(argc, argv);
 
@@ -277,6 +303,15 @@ int main(int argc, char** argv)
 
     printf("[path_follower] Running.  path=%s  odom=%s  cmd=%s\n",
             pathTopic.c_str(), odomTopic.c_str(), cmdTopic.c_str());
+    printf("[path_follower] LOCAL BUILD from ./repo  DIMOS_DEBUG=%d\n", (int)dimosDebug);
+    printf("[path_follower] config: autonomyMode=%d autonomySpeed=%.2f maxSpeed=%.2f "
+           "maxYawRate=%.2f maxAccel=%.2f lookAheadDis=%.2f stopDisThre=%.2f "
+           "slowDwnDisThre=%.2f dirDiffThre=%.2f omniDirGoalThre=%.2f "
+           "omniDirDiffThre=%.2f twoWayDrive=%d noRotAtGoal=%d joySpeed=%.2f\n",
+           (int)autonomyMode, autonomySpeed, maxSpeed, maxYawRate, maxAccel,
+           lookAheadDis, stopDisThre, slowDwnDisThre, dirDiffThre,
+           omniDirGoalThre, omniDirDiffThre, (int)twoWayDrive, (int)noRotAtGoal,
+           joySpeed);
     fflush(stdout);
 
     // --- Main loop at 100 Hz ---
@@ -295,7 +330,11 @@ int main(int argc, char** argv)
                                + cos(vehicleYawRec) * (vehicleY - vehicleYRec);
 
             int pathSize = static_cast<int>(pathPoses.size());
-            if (pathSize <= 0) { pathInit = false; continue; }
+            if (pathSize <= 0) {
+                DBG_EVERY(50, "pathSize=0, skipping (was init)\n");
+                pathInit = false;
+                continue;
+            }
             float endDisX = static_cast<float>(pathPoses[pathSize - 1].x) - vehicleXRel;
             float endDisY = static_cast<float>(pathPoses[pathSize - 1].y) - vehicleYRel;
             float endDis  = sqrt(endDisX * endDisX + endDisY * endDisY);
@@ -442,6 +481,12 @@ int main(int argc, char** argv)
                 }
 
                 lcm.publish(cmdTopic, &cmd_vel);
+                DBG_EVERY(50, "cmd_vel: lin=(%.2f,%.2f) ang_z=%.2f  "
+                              "vehicleSpeed=%.2f dirDiff=%.2f dis=%.2f endDis=%.2f "
+                              "pathPointID=%d/%d navFwd=%d safetyStop=%d\n",
+                          cmd_vel.linear.x, cmd_vel.linear.y, cmd_vel.angular.z,
+                          vehicleSpeed, dirDiff, dis, endDis,
+                          pathPointID, pathSize, (int)navFwd, safetyStop);
                 pubSkipCount = pubSkipNum;
             }
         }
