@@ -4,6 +4,14 @@
 // Subscribes to path and odometry over LCM, publishes cmd_vel (Twist).
 //
 // Original: src/base_autonomy/local_planner/src/pathFollower.cpp
+//
+// Intentionally not ported from the original:
+//   - /joy (sensor_msgs/Joy) subscription — DimOS handles joystick via
+//     MovementManager, which muxes tele_cmd_vel and nav_cmd_vel upstream
+//   - manualMode — same reason; MovementManager handles teleop bypass
+//   - Serial motor controller (realRobot mode) — DimOS robot connections
+//     handle hardware transport separately
+//   - joyToSpeedDelay — not needed without direct joystick subscription
 
 #include <cmath>
 #include <cstdio>
