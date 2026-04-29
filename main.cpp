@@ -20,6 +20,7 @@
 #include "nav_msgs/Odometry.hpp"
 #include "nav_msgs/Path.hpp"
 #include "geometry_msgs/Twist.hpp"
+#include "std_msgs/Int8.hpp"
 
 using namespace std;
 
@@ -165,6 +166,22 @@ public:
         }
     }
 
+    // Slow-down handler (from LocalPlanner) ------------------------------------
+    void slowDownHandler(const lcm::ReceiveBuffer* /*rbuf*/,
+                         const std::string& /*channel*/,
+                         const std_msgs::Int8* msg)
+    {
+        slowDown = msg->data;
+    }
+
+    // Safety stop handler -----------------------------------------------------
+    void stopHandler(const lcm::ReceiveBuffer* /*rbuf*/,
+                     const std::string& /*channel*/,
+                     const std_msgs::Int8* msg)
+    {
+        safetyStop = msg->data;
+    }
+
     // Path handler -----------------------------------------------------------
     void pathHandler(const lcm::ReceiveBuffer* /*rbuf*/,
                      const std::string& /*channel*/,
@@ -256,6 +273,13 @@ int main(int argc, char** argv)
     const std::string odomTopic = mod.topic("odometry");
     const std::string cmdTopic  = mod.topic("cmd_vel");
 
+    // Optional ports (connected only when another module provides them)
+    auto opt_topic = [&](const char* name) -> std::string {
+        return mod.has(name) ? mod.topic(name) : "";
+    };
+    const std::string slowDownTopic = opt_topic("slow_down");
+    const std::string stopTopic     = opt_topic("safety_stop");
+
     // --- Create LCM instance ---
     lcm::LCM lcm;
     if (!lcm.good()) {
@@ -267,6 +291,14 @@ int main(int argc, char** argv)
     Handlers handlers;
     lcm.subscribe(odomTopic, &Handlers::odomHandler, &handlers);
     lcm.subscribe(pathTopic, &Handlers::pathHandler,  &handlers);
+    if (!slowDownTopic.empty()) {
+        lcm.subscribe(slowDownTopic, &Handlers::slowDownHandler, &handlers);
+        printf("[path_follower] slow_down=%s\n", slowDownTopic.c_str());
+    }
+    if (!stopTopic.empty()) {
+        lcm.subscribe(stopTopic, &Handlers::stopHandler, &handlers);
+        printf("[path_follower] safety_stop=%s\n", stopTopic.c_str());
+    }
 
     // --- Initial speed for autonomy mode ---
     if (autonomyMode) {
