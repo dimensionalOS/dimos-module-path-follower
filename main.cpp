@@ -126,6 +126,7 @@ static double switchTime = 0;
 
 static int    safetyStop = 0;
 static int    slowDown = 0;
+static double lastLoopOdomTime = 0;
 
 // Path storage  (we keep a simple vector of poses)
 struct SimplePose {
@@ -329,6 +330,12 @@ int main(int argc, char** argv)
         if (pathInit) {
             std::lock_guard<std::mutex> lock(pathMutex);
 
+            // Compute dt from odom timestamps for deterministic acceleration
+            double dt = (lastLoopOdomTime > 0 && odomTime > lastLoopOdomTime)
+                ? (odomTime - lastLoopOdomTime) : 0.01;
+            if (dt > 0.1) dt = 0.1;  // Clamp to avoid huge jumps
+            lastLoopOdomTime = odomTime;
+
             float vehicleXRel =  cos(vehicleYawRec) * (vehicleX - vehicleXRec)
                                + sin(vehicleYawRec) * (vehicleY - vehicleYRec);
             float vehicleYRel = -sin(vehicleYawRec) * (vehicleX - vehicleXRec)
@@ -365,17 +372,16 @@ int main(int argc, char** argv)
             if (dirDiff >  PI) dirDiff -= 2 * PI;
             else if (dirDiff < -PI) dirDiff += 2 * PI;
 
-            // Two-way drive: switch forward/reverse
+            // Two-way drive: switch forward/reverse (uses odom time for determinism)
             if (twoWayDrive) {
-                double time = now_seconds();
                 if (fabs(dirDiff) > PI / 2 && navFwd &&
-                    time - switchTime > switchTimeThre) {
+                    odomTime - switchTime > switchTimeThre) {
                     navFwd = false;
-                    switchTime = time;
+                    switchTime = odomTime;
                 } else if (fabs(dirDiff) < PI / 2 && !navFwd &&
-                           time - switchTime > switchTimeThre) {
+                           odomTime - switchTime > switchTimeThre) {
                     navFwd = true;
-                    switchTime = time;
+                    switchTime = odomTime;
                 }
             }
 
@@ -387,7 +393,7 @@ int main(int argc, char** argv)
             }
 
             // PID yaw controller
-            if (fabs(vehicleSpeed) < 2.0 * maxAccel / 100.0)
+            if (fabs(vehicleSpeed) < 2.0 * maxAccel * dt)
                 vehicleYawRate = static_cast<float>(-stopYawRateGain * dirDiff);
             else
                 vehicleYawRate = static_cast<float>(-yawRateGain * dirDiff);
@@ -435,19 +441,20 @@ int main(int argc, char** argv)
             else if (slowDown == 3)
                 joySpeed3 *= static_cast<float>(slowRate3);
 
-            // Acceleration / deceleration ramp
+            // Acceleration / deceleration ramp (time-based for determinism)
+            float accelStep = static_cast<float>(maxAccel * dt);
             if ((fabs(dirDiff) < dirDiffThre ||
                  (dis < omniDirGoalThre && fabs(dirDiff) < omniDirDiffThre)) &&
                 dis > stopDisThre) {
                 if (vehicleSpeed < joySpeed3)
-                    vehicleSpeed += static_cast<float>(maxAccel / 100.0);
+                    vehicleSpeed += accelStep;
                 else if (vehicleSpeed > joySpeed3)
-                    vehicleSpeed -= static_cast<float>(maxAccel / 100.0);
+                    vehicleSpeed -= accelStep;
             } else {
                 if (vehicleSpeed > 0)
-                    vehicleSpeed -= static_cast<float>(maxAccel / 100.0);
+                    vehicleSpeed -= accelStep;
                 else if (vehicleSpeed < 0)
-                    vehicleSpeed += static_cast<float>(maxAccel / 100.0);
+                    vehicleSpeed += accelStep;
             }
 
             // Inclination stop
@@ -472,7 +479,7 @@ int main(int argc, char** argv)
                 cmd_vel.angular.y = 0;
                 cmd_vel.angular.z = vehicleYawRate;
 
-                if (fabs(vehicleSpeed) > maxAccel / 100.0) {
+                if (fabs(vehicleSpeed) > maxAccel * dt) {
                     if (omniDirGoalThre > 0) {
                         cmd_vel.linear.x =  cos(dirDiff) * vehicleSpeed;
                         cmd_vel.linear.y = -sin(dirDiff) * vehicleSpeed;
