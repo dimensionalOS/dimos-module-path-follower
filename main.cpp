@@ -320,6 +320,12 @@ int main(int argc, char** argv)
             pathTopic.c_str(), odomTopic.c_str(), cmdTopic.c_str());
     fflush(stdout);
 
+    // NativeModule.start() in Python reads stderr for this marker and only
+    // returns once it sees it. Without this, upstream publishers can race
+    // ahead and emit messages before our LCM subscriptions are live.
+    fprintf(stderr, "[DIMOS_NATIVE_READY]\n");
+    fflush(stderr);
+
     // --- Main loop at 100 Hz ---
     const auto loopPeriod = std::chrono::milliseconds(10);
 
