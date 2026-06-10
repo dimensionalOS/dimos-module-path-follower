@@ -20,6 +20,17 @@
       let
         pkgs = import nixpkgs { inherit system; };
         lcm = lcm-extended.packages.${system}.lcm;
+
+        # Disable PCL's OpenNI grabbers. PCL 1.15.1's CMake auto-enables
+        # WITH_OPENNI on Linux without putting the openni package on the
+        # include path, so io/openni_camera/openni.h fails to find XnOS.h.
+        # We don't use the grabber.
+        pcl = pkgs.pcl.overrideAttrs (old: {
+          cmakeFlags = (old.cmakeFlags or []) ++ [
+            "-DWITH_OPENNI=OFF"
+            "-DWITH_OPENNI2=OFF"
+          ];
+        });
       in {
         packages.default = pkgs.stdenv.mkDerivation {
           pname = "smartnav-path-follower";
@@ -27,7 +38,7 @@
           src = ./.;
 
           nativeBuildInputs = [ pkgs.cmake pkgs.pkg-config ];
-          buildInputs = [ lcm pkgs.glib pkgs.eigen pkgs.boost pkgs.pcl ];
+          buildInputs = [ lcm pkgs.glib pkgs.eigen pkgs.boost pcl ];
 
           cmakeFlags = [
             "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
